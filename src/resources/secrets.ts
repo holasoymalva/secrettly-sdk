@@ -8,6 +8,7 @@ import {
   RevokeSecretResponse,
   Secret,
   SecretMetadata,
+  RevealSecretResponse,
 } from '../types.js';
 
 /**
@@ -92,9 +93,42 @@ export class Secrets {
   async revoke(id: string): Promise<RevokeSecretResponse> {
     validateId(id, 'secret');
 
-    return this.client.request<RevokeSecretResponse>({
-      method: 'POST',
-      path: `/secrets/${id}/revoke`,
+    const response = await this.client.request<{ id: string; status: string; updatedAt: string }>({
+      method: 'DELETE',
+      path: `/secrets/${id}`,
+    });
+
+    return {
+      success: response.status === 'REVOKED' || response.status === 'revoked',
+      id: response.id,
+      status: response.status,
+      updatedAt: response.updatedAt,
+    };
+  }
+
+  /**
+   * Reveals/decrypts a secret's raw content using its reveal token.
+   * This is a public, unauthenticated request (no API Key is required).
+   * Note: The secret will be consumed and invalid for future reveal attempts.
+   *
+   * @param revealToken The unique reveal token extracted from the secret's ephemeral link.
+   * @returns A promise resolving to the decrypted secret content.
+   * @throws {ValidationError} If the reveal token is invalid.
+   * @throws {SecrettlyError} If the secret has expired, exceeded view limit, or was revoked (returns 410/404).
+   * 
+   * @example
+   * ```ts
+   * const secret = await client.secrets.reveal("ac78de9b0a1f2b3c");
+   * console.log(secret.content); // "DB_URL=postgres://..."
+   * ```
+   */
+  async reveal(revealToken: string): Promise<RevealSecretResponse> {
+    validateId(revealToken, 'revealToken');
+
+    return this.client.request<RevealSecretResponse>({
+      method: 'GET',
+      path: `/secrets/reveal/${revealToken}`,
+      skipAuth: true,
     });
   }
 

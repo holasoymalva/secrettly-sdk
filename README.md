@@ -9,93 +9,45 @@ The `@secrettly/sdk` is a lightweight, zero-dependency, modern TypeScript librar
 
 ---
 
-## Getting Started
+## Features
 
-### Installation
+- **Runtime Agnostic:** Works flawlessly in Node.js, Deno, Bun, and browser environments.
+- **Zero Dependencies:** Relies entirely on native `fetch` and standard Web Crypto APIs.
+- **Modern ESM First:** Built using ES Modules with CommonJS fallback support.
+- **Robust HTTP Client:** Built-in automatic retries with exponential backoff + jitter, configurable timeouts, and AbortController.
+- **Type Safe:** Complete TypeScript definitions and JSDoc documentation out-of-the-box.
+- **Robust Error Handling:** Rich error hierarchy (`ValidationError`, `AuthenticationError`, `RateLimitError`, `NetworkError`, etc.).
 
-Install the SDK package using your preferred package manager:
+---
 
+## Installation
+
+### Node.js (npm, yarn, pnpm)
 ```bash
-# npm
 npm install @secrettly/sdk
-
-# yarn
+# or
 yarn add @secrettly/sdk
-
-# pnpm
+# or
 pnpm add @secrettly/sdk
+```
 
-# Bun
+### Bun
+```bash
 bun add @secrettly/sdk
 ```
 
----
-
-## Testing & Local Development
-
-If you want to clone this repository, run the test suites, check coverage, and experiment with the SDK, follow the guide below.
-
-### 1. Prerequisites
-Make sure you have Node.js (v20 or higher) installed.
-
-### 2. Clone and Setup
-Clone the repository and install all dependencies:
-```bash
-git clone https://github.com/holasoymalva/secrettly-sdk.git
-cd secrettly-sdk
-npm install
+### Deno
+Import directly using npm specifiers:
+```ts
+import { Secrettly } from "npm:@secrettly/sdk";
 ```
-
-### 3. Running Unit Tests
-We use **Vitest** for unit testing. You can run all the tests once, watch for changes, or generate a code coverage report:
-
-```bash
-# Run tests once
-npm run test
-
-# Run tests in watch mode (interactive)
-npm run test:watch
-
-# Run tests with code coverage report
-npm run test:coverage
-```
-
-### 4. Running the Examples
-We have included runnable TypeScript examples under the `examples/` directory. 
-
-To execute them, set your `SECRETTLY_API_KEY` (if you have one) or run them as-is to see the SDK's built-in error handling and backoff retries in action:
-
-```bash
-# Set your API Key (Optional)
-export SECRETTLY_API_KEY="sk_live_your_key_here"
-
-# Run the create-secret example
-npx tsx examples/create-secret.ts
-
-# Run the list-secrets example
-npx tsx examples/list-secrets.ts
-
-# Run the revoke-secret example
-npx tsx examples/revoke-secret.ts
-```
-
-### 5. Compiling the SDK
-You can compile the TypeScript source files to ESM and CommonJS bundle formats:
-```bash
-npm run build
-```
-This builds and cleans the output into the `dist/` directory, outputting:
-- `dist/index.js` (ES Modules)
-- `dist/index.cjs` (CommonJS)
-- `dist/index.d.ts` & `dist/index.d.cts` (TypeScript Declaration Files)
 
 ---
 
-## SDK Usage Guide
+## Quick Start
 
-### Basic Initialization
-
-Initialize the client with your Secrettly API key:
+### 1. Create a Secret
+Initialize the client with your Secrettly HMAC API key (`sk_live_...`):
 
 ```typescript
 import { Secrettly } from "@secrettly/sdk";
@@ -103,18 +55,40 @@ import { Secrettly } from "@secrettly/sdk";
 const client = new Secrettly({
   apiKey: process.env.SECRETTLY_API_KEY!,
 });
+
+// Create an ephemeral secret link
+const secret = await client.secrets.create({
+  content: "DATABASE_URL=postgresql://postgres:secret@localhost:5432/db",
+  expiresIn: "1h", // Supported units: m (minutes), h (hours), d (days)
+  maxViews: 1,
+});
+
+console.log(`Secret created! Ephemeral Link: ${secret.url}`);
+// Output: https://secrettly.space/s/ac78de9b0a1f2b3c
 ```
 
-### Advanced Configuration
+### 2. Reveal a Secret (Public Endpoint)
+To decrypt/consume the secret payload, use the public reveal endpoint. This is unauthenticated, as the `revealToken` inside the URL serves as the authorization.
 
-You can customize timeouts and retry numbers (for network/5xx server errors):
+```typescript
+// Extract the reveal token from the secret URL (e.g., "ac78de9b0a1f2b3c")
+const result = await client.secrets.reveal("ac78de9b0a1f2b3c");
+
+console.log(`Decrypted secret content: ${result.content}`);
+```
+
+---
+
+## Configuration
+
+Customize the SDK client options during initialization:
 
 ```typescript
 const client = new Secrettly({
   apiKey: "sk_live_...",
   
-  // Custom API endpoint (e.g. for self-hosting)
-  baseUrl: "https://api.secrettly.space/v1",
+  // Custom API endpoint (e.g. for local development or self-hosting)
+  baseUrl: "http://localhost:3000",
   
   // Timeout in milliseconds (default: 10000ms)
   timeout: 5000, 
@@ -126,46 +100,9 @@ const client = new Secrettly({
 
 ---
 
-## API Reference
-
-### `client.secrets`
-
-#### `create(request: CreateSecretRequest): Promise<Secret>`
-Creates an encrypted ephemeral secret.
-- **Request Parameters:**
-  - `content` (string, required): The secret data.
-  - `expiresIn` (string, optional): Expiration duration (e.g. `"15m"`, `"1h"`, `"7d"`).
-  - `maxViews` (number, optional): Max retrieval counts. Defaults to `1`.
-- **Response Format:**
-  - `id` (string): Unique identifier for the secret.
-  - `url` (string): URL to view/retrieve the secret.
-  - `expiresAt` (string): ISO timestamp of expiration.
-
-#### `get(id: string): Promise<SecretMetadata>`
-Retrieves the metadata of a secret without showing the content (preserving ephemeral access logs).
-- **Response Format:**
-  - `id` (string): Unique identifier.
-  - `createdAt` (string): ISO timestamp of creation.
-  - `expiresAt` (string): ISO timestamp of expiration.
-  - `views` (number): Current views count.
-  - `maxViews` (number): Maximum allowed views.
-  - `status` (string): Status of the secret (`"active" | "revoked" | "expired" | "view_limit_reached"`).
-
-#### `revoke(id: string): Promise<RevokeSecretResponse>`
-Immediately invalidates and revokes an active secret.
-- **Response Format:**
-  - `success` (boolean): `true` if successfully revoked.
-
-#### `list(): Promise<SecretMetadata[]>`
-Lists the metadata for all secrets.
-- **Response Format:**
-  - `Array<SecretMetadata>`: Array of secret metadata configurations.
-
----
-
 ## Error Handling
 
-The SDK exposes a hierarchy of custom error classes extending `SecrettlyError`. You can catch and inspect the error instances to take appropriate action:
+The SDK exposes a hierarchy of custom error classes extending `SecrettlyError`. You can inspect the error instance to take appropriate actions:
 
 ```typescript
 import { 
@@ -176,8 +113,6 @@ import {
   ApiError,
   NetworkError
 } from "@secrettly/sdk";
-
-const client = new Secrettly({ apiKey: "sk_live_..." });
 
 try {
   const secret = await client.secrets.create({
@@ -198,13 +133,134 @@ try {
     // Thrown for timeouts or total network connection losses
     console.error("Network / Timeout error:", error.message);
   } else if (error instanceof ApiError) {
-    // Generic API responses fallback (e.g., 404, 500 status codes)
+    // Generic API responses fallback (e.g. 404, 500 status codes)
     console.error(`API Error (${error.statusCode}):`, error.message);
-  } else {
-    // Other errors
-    console.error("Unexpected error:", error);
   }
 }
+```
+
+---
+
+## Webhook Signature Verification
+
+Secrettly sends HTTP webhooks to your endpoints on lifecycle changes (e.g., `secret.created`, `secret.opened`). Every request includes a `Secrettly-Signature` header.
+
+You can verify the webhook signatures using our runtime-agnostic static helper:
+
+```typescript
+import { Webhooks } from "@secrettly/sdk";
+
+// In your Express or NestJS webhook handler:
+app.post("/webhooks", express.raw({ type: "application/json" }), async (req, res) => {
+  const signatureHeader = req.headers["secrettly-signature"];
+  const rawBodyText = req.body.toString();
+  const webhookSigningSecret = "whsec_..."; // Returned during webhook registration
+  
+  const isValid = await Webhooks.verifySignature(
+    rawBodyText,
+    signatureHeader,
+    webhookSigningSecret
+  );
+
+  if (!isValid) {
+    return res.status(400).send("Invalid signature");
+  }
+
+  // Signature verified, process webhook safely
+  const event = JSON.parse(rawBodyText);
+  console.log(`Received event type: ${event.type}`);
+  res.status(200).send("ok");
+});
+```
+
+---
+
+## API Reference
+
+### `client.secrets`
+
+#### `create(request: CreateSecretRequest): Promise<Secret>`
+Creates an encrypted ephemeral secret.
+- **Request Parameters:**
+  - `content` (string, required): The secret data.
+  - `expiresIn` (string, optional): Expiration duration (e.g. `"15m"`, `"1h"`, `"7d"`).
+  - `maxViews` (number, optional): Max retrieval counts. Defaults to `1`.
+
+#### `reveal(revealToken: string): Promise<RevealSecretResponse>`
+Publicly decrypts and consumes the secret payload using its reveal token. **This endpoint is unauthenticated.**
+- **Response Format:**
+  - `content` (string): Plaintext secret payload.
+
+#### `get(id: string): Promise<SecretMetadata>`
+Retrieves the metadata of a secret without showing the content (preserving ephemeral security).
+- **Response Format:**
+  - `id` (string): Unique identifier.
+  - `createdAt` (string): ISO timestamp of creation.
+  - `expiresAt` (string): ISO timestamp of expiration.
+  - `views` (number): Current views count.
+  - `maxViews` (number): Maximum allowed views.
+  - `status` (string): Status of the secret (`"active" | "revoked" | "expired" | "view_limit_reached" | "CONSUMED" | "REVOKED"`).
+
+#### `revoke(id: string): Promise<RevokeSecretResponse>`
+Immediately invalidates and revokes an active secret.
+- **Response Format:**
+  - `success` (boolean): `true` if successfully revoked.
+  - `id` (string): Unique identifier of the revoked secret.
+  - `status` (string): Status of the secret (`"REVOKED"`).
+  - `updatedAt` (string): ISO timestamp of revocation.
+
+#### `list(): Promise<SecretMetadata[]>`
+Lists the metadata for all secrets.
+
+---
+
+### `client.events`
+
+#### `list(options?: { page?: number, limit?: number }): Promise<ListEventsResponse>`
+Retrieves paginated audit event logs scoped by organization.
+- **Response Format:**
+  - `data` (EventLog[]): Array of event items (`{ id, type, organizationId, userId, metadata, createdAt }`).
+  - `page` (number): Current page.
+  - `limit` (number): Limit per page.
+  - `total` (number): Total matching audit events.
+
+---
+
+### `client.webhooks`
+
+#### `register(request: WebhookRegistrationRequest): Promise<WebhookRegistrationResponse>`
+Registers a new webhook listener endpoint.
+- **Request Parameters:**
+  - `url` (string, required): Endpoint URL.
+  - `events` (string[], required): Event types to subscribe to (e.g., `["secret.created", "secret.opened"]`).
+- **Response Format:**
+  - `id` (string): Unique identifier of the webhook.
+  - `url` (string): Registered destination URL.
+  - `secret` (string): Webhook signing secret (`whsec_...`).
+  - `events` (string[]): Subscribed events.
+  - `isActive` (boolean): `true` if active.
+
+---
+
+## Testing & Local Development
+
+### 1. Clone and Setup
+```bash
+git clone https://github.com/holasoymalva/secrettly-sdk.git
+cd secrettly-sdk
+npm install
+```
+
+### 2. Running Unit Tests & Coverage
+We use **Vitest** for testing:
+```bash
+npm run test           # Run tests once
+npm run test:coverage  # Run tests with code coverage report
+```
+
+### 3. Compiling the SDK
+```bash
+npm run build          # Compiles to ESM and CJS bundle formats under /dist
 ```
 
 ---

@@ -11,6 +11,7 @@ interface RequestOptions {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   path: string;
   body?: unknown;
+  skipAuth?: boolean;
 }
 
 /**
@@ -34,11 +35,14 @@ export class RequestClient {
    * Helper to construct headers dynamically.
    * Filters out restricted headers in browser environments.
    */
-  private getHeaders(): Record<string, string> {
+  private getHeaders(skipAuth = false): Record<string, string> {
     const headers: Record<string, string> = {
-      'Authorization': `Bearer ${this.apiKey}`,
       'Content-Type': 'application/json',
     };
+
+    if (!skipAuth) {
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    }
 
     // User-Agent is blocked by browsers, so only set in non-browser environments
     if (typeof window === 'undefined' && typeof process !== 'undefined') {
@@ -72,7 +76,7 @@ export class RequestClient {
       try {
         const response = await fetch(url, {
           method: options.method,
-          headers: this.getHeaders(),
+          headers: this.getHeaders(options.skipAuth),
           body: options.body ? JSON.stringify(options.body) : undefined,
           signal: controller.signal,
         });

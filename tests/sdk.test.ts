@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Secrettly } from '../src/client.js';
+import { Webhooks } from '../src/resources/webhooks.js';
 import {
   ApiError,
   AuthenticationError,
@@ -120,9 +121,13 @@ describe('Secrettly SDK', () => {
       expect(fetchSpy.mock.calls[0][0]).toBe('https://api.secrettly.space/v1/secrets/sec_123');
     });
 
-    it('should revoke a secret successfully', async () => {
+    it('should revoke a secret successfully using DELETE', async () => {
       const client = new Secrettly({ apiKey: 'sk_live_123' });
-      const mockResponse = { success: true };
+      const mockResponse = {
+        id: 'sec_123',
+        status: 'REVOKED',
+        updatedAt: '2026-06-19T19:45:00.000Z',
+      };
 
       const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
         ok: true,
@@ -133,10 +138,15 @@ describe('Secrettly SDK', () => {
       const result = await client.secrets.revoke('sec_123');
 
       expect(fetchSpy).toHaveBeenCalledTimes(1);
-      expect(result).toEqual(mockResponse);
-      expect(fetchSpy.mock.calls[0][0]).toBe(
-        'https://api.secrettly.space/v1/secrets/sec_123/revoke'
-      );
+      expect(result).toEqual({
+        success: true,
+        id: 'sec_123',
+        status: 'REVOKED',
+        updatedAt: '2026-06-19T19:45:00.000Z',
+      });
+      const [calledUrl, calledInit] = fetchSpy.mock.calls[0];
+      expect(calledUrl).toBe('https://api.secrettly.space/v1/secrets/sec_123');
+      expect(calledInit?.method).toBe('DELETE');
     });
 
     it('should list secrets successfully supporting both array and wrapped response formats', async () => {
@@ -298,6 +308,163 @@ describe('Secrettly SDK', () => {
 
       await expect(client.secrets.get('sec_123')).rejects.toThrow(NetworkError);
       await expect(client.secrets.get('sec_123')).rejects.toThrow('Request timed out after 50ms');
+    });
+  });
+
+  describe('Public Secret Reveal', () => {
+    it('should reveal a secret without authorization header', async () => {
+      const client = new Secrettly({ apiKey: 'sk_live_123' });
+      const mockResponse = { content: 'decrypted_plaintext' };
+
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(mockResponse),
+      } as Response);
+
+      const secret = await client.secrets.reveal('ac78de9b0a1f2b3c');
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(secret).toEqual(mockResponse);
+      
+      const [calledUrl, calledInit] = fetchSpy.mock.calls[0];
+      expect(calledUrl).toBe('https://api.secrettly.space/v1/secrets/reveal/ac78de9b0a1f2b3c');
+      expect(calledInit?.method).toBe('GET');
+      expect(calledInit?.headers).not.toHaveProperty('Authorization');
+    });
+  });
+
+  describe('Events Audit Logs', () => {
+    it('should query events list with pagination', async () => {
+      const client = new Secrettly({ apiKey: 'sk_live_123' });
+      const mockResponse = {
+        data: [
+          {
+            id: 'ev_123',
+            type: 'secret.created',
+            organizationId: 'org_123',
+            userId: 'usr_123',
+            createdAt: '2026-06-19T19:44:03.000Z',
+          }
+        ],
+        page: 1,
+        limit: 10,
+        total: 1
+      };
+
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(mockResponse),
+      } as Response);
+
+      const events = await client.events.list({ page: 1, limit: 10 });
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(events).toEqual(mockResponse);
+      
+      const [calledUrl, calledInit] = fetchSpy.mock.calls[0];
+      expect(calledUrl).toBe('https://api.secrettly.space/v1/events?page=1&limit=10');
+      expect(calledInit?.method).toBe('GET');
+    });
+
+    it('should query events list with no options', async () => {
+      const client = new Secrettly({ apiKey: 'sk_live_123' });
+      const mockResponse = { data: [], page: 1, limit: 20 };
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(mockResponse),
+      } as Response);
+
+      const events = await client.events.list();
+      expect(events).toEqual(mockResponse);
+      expect(fetchSpy.mock.calls[0][0]).toBe('https://api.secrettly.space/v1/events');
+    });
+  });
+
+  describe('Webhooks & Verification', () => {
+    it('should register a webhook successfully', async () => {
+      const client = new Secrettly({ apiKey: 'sk_live_123' });
+      const mockResponse = {
+        id: 'wh_123',
+        url: 'https://domain.com/webhook',
+        secret: 'whsec_secret',
+        events: ['secret.created'],
+        isActive: true,
+      };
+
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(mockResponse),
+      } as Response);
+
+      const webhook = await client.webhooks.register({
+        url: 'https://domain.com/webhook',
+        events: ['secret.created'],
+      });
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(webhook).toEqual(mockResponse);
+      const [calledUrl, calledInit] = fetchSpy.mock.calls[0];
+      expect(calledUrl).toBe('https://api.secrettly.space/v1/webhooks');
+      expect(calledInit?.method).toBe('POST');
+    });
+
+    it('should verify correct webhook HMAC signatures', async () => {
+      const payload = '{"id":"sec_123","status":"consumed"}';
+      const secret = 'whsec_test_secret';
+      const timestamp = Math.floor(Date.now() / 1000);
+      
+      const crypto = await import('crypto');
+      const signaturePayload = `${timestamp}.${payload}`;
+      const v1Signature = crypto.createHmac('sha256', secret).update(signaturePayload).digest('hex');
+      const header = `t=${timestamp},v1=${v1Signature}`;
+
+      const isValid = await Webhooks.verifySignature(payload, header, secret);
+      expect(isValid).toBe(true);
+    });
+
+    it('should fail webhook verification on timestamp mismatch (replay attack)', async () => {
+      const payload = '{"id":"sec_123"}';
+      const secret = 'whsec_test_secret';
+      const timestamp = Math.floor(Date.now() / 1000) - 600;
+      
+      const crypto = await import('crypto');
+      const signaturePayload = `${timestamp}.${payload}`;
+      const v1Signature = crypto.createHmac('sha256', secret).update(signaturePayload).digest('hex');
+      const header = `t=${timestamp},v1=${v1Signature}`;
+
+      const isValid = await Webhooks.verifySignature(payload, header, secret, 300);
+      expect(isValid).toBe(false);
+    });
+
+    it('should return false if verification inputs are missing', async () => {
+      expect(await Webhooks.verifySignature('', 'header', 'sec')).toBe(false);
+      expect(await Webhooks.verifySignature('body', '', 'sec')).toBe(false);
+      expect(await Webhooks.verifySignature('body', 'header', '')).toBe(false);
+    });
+
+    it('should return false if signature header format is invalid', async () => {
+      expect(await Webhooks.verifySignature('body', 'invalid_header', 'sec')).toBe(false);
+      expect(await Webhooks.verifySignature('body', 't=123', 'sec')).toBe(false);
+      expect(await Webhooks.verifySignature('body', 'v1=abc', 'sec')).toBe(false);
+      expect(await Webhooks.verifySignature('body', 't=abc,v1=xyz', 'sec')).toBe(false);
+    });
+
+    it('should verify signature ignoring tolerance if tolerance is 0', async () => {
+      const payload = '{"id":"sec_123"}';
+      const secret = 'whsec_test_secret';
+      const timestamp = Math.floor(Date.now() / 1000) - 600;
+      
+      const crypto = await import('crypto');
+      const signaturePayload = `${timestamp}.${payload}`;
+      const v1Signature = crypto.createHmac('sha256', secret).update(signaturePayload).digest('hex');
+      const header = `t=${timestamp},v1=${v1Signature}`;
+
+      const isValid = await Webhooks.verifySignature(payload, header, secret, 0);
+      expect(isValid).toBe(true);
     });
   });
 });

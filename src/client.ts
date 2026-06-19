@@ -1,4 +1,6 @@
 import { Secrets } from './resources/secrets.js';
+import { Events } from './resources/events.js';
+import { Webhooks } from './resources/webhooks.js';
 import { ClientOptions } from './types.js';
 import { RequestClient } from './utils/request.js';
 import { validateClientOptions } from './utils/validation.js';
@@ -11,6 +13,16 @@ export class Secrettly {
    * Operations for managing ephemeral secrets.
    */
   public readonly secrets: Secrets;
+
+  /**
+   * Operations for querying audit events / logs.
+   */
+  public readonly events: Events;
+
+  /**
+   * Operations for registering and managing webhook subscriptions.
+   */
+  public readonly webhooks: Webhooks;
 
   /**
    * The underlying HTTP client used by the SDK.
@@ -39,5 +51,7 @@ export class Secrettly {
 
     this.requestClient = new RequestClient(options);
     this.secrets = new Secrets(this.requestClient);
+    this.events = new Events(this.requestClient);
+    this.webhooks = new Webhooks(this.requestClient);
   }
 }
